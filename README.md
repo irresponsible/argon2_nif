@@ -9,12 +9,10 @@ The argon2 secure password hashing function, now usable from your rebar3 project
 Add this repo to your rebar.config `deps`:
 
 ```
-{argon2_erl, {git, "https://github.com/irresponsible/argon2_erl", {branch, master}}}
+{argon2, {git, "https://github.com/irresponsible/argon2_nif", {branch, master}}}
 ```
 
-And this to your `.app.src`'s `applications`: `argon2_erl`
-
-The API is really simple:
+And this to your `.app.src`'s `applications`: `argon2`. This will load the `argon2` and `argon2_nif` modules. The public API (module `argon2`) is really simple:
 
 ```erlang
 1> argon2:verify(<<"hello">>, argon2:hash(<<"hello">>)).
@@ -25,9 +23,9 @@ There are also 2- and 3-arity versions of the `argon2:hash` function which provi
 
 ## Requirements
 
-An erlang with dirty nifs enabled is required. This is default from R20 onwards but must be enabled during build for previous erlangs.
+An erlang with dirty nifs enabled is required. This is default from R20 onwards but must be enabled during build for previous erlangs. Dirty nifs run on a separate OS thread and because argon2 is an expensive function (ideally it should take several seconds to hash whereas blocking for more than a millisecond is a bad idea ), this helps to avoid messing up the erlang scheduler.
 
-Building also requires a c compiler and rebar3
+Building also requires a c compiler, GNU Make and rebar3
 
 ## Building
 
@@ -46,9 +44,7 @@ rebar3 proper # property tests
 
 ## See also
 
-* [argon2_elixir](httpsi://github.com/riverrun/argon2_elixir), the elixir library upon which this one is based and whose nifs we use.
-
-Note that we're not using this because we had difficulties getting it to build as a dependency.
+* [argon2_elixir](httpsi://github.com/riverrun/argon2_elixir), the elixir library upon which this one is based and whose nifs we use. It doesn't want to build in a rebar3 project.
 
 ## Copyright and License
 

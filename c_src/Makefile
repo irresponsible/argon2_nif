@@ -13,7 +13,6 @@ ARGON2_INC_DIR = $(BASEDIR)/vendor/argon2/include
 # System type and C compiler/flags.
 
 UNAME_SYS := $(shell uname -s)
-CFLAGS += -std=c89 -pthread -O3 -Wall -g -I$(ARGON2_INC_DIR) -I$(ARGON2_SRC_DIR) -I. -I$(ERTS_INCLUDE_DIR)
 
 OPTTARGET ?= native
 OPTTEST := $(shell $(CC) -I$(ARGON2_INC_DIR) -I$(ARGON2_SRC_DIR) -march=$(OPTTARGET) $(SRC_DIR)/opt.c -c\
@@ -27,6 +26,26 @@ SOURCES := \
 	$(ARGON2_SRC_DIR)/encoding.c \
 	$(CURDIR)/argon2_nif.c
 
+KERNEL_NAME := $(shell uname -s)
+
+LIB_NAME = $(BASEDIR)/priv/argon2_nif.so
+
+ifneq ($(CROSSCOMPILE),)
+	CFLAGS := -shared -fPIC -fvisibility=hidden -DA2_VISCTL=1
+	LDFLAGS := -Wl,-soname,libargon2.so.0
+else
+	ifeq ($(KERNEL_NAME), Linux)
+		CFLAGS := -shared -fPIC -fvisibility=hidden -DA2_VISCTL=1
+		LDFLAGS := -Wl,-soname,libargon2.so.0
+	endif
+	ifeq ($(KERNEL_NAME), Darwin)
+		CFLAGS := -dynamiclib -undefined dynamic_lookup
+	endif
+	ifeq ($(KERNEL_NAME), $(filter $(KERNEL_NAME),OpenBSD FreeBSD NetBSD))
+		CFLAGS := -shared -fPIC
+	endif
+endif
+
 ifneq ($(OPTTEST), 0)
 	SOURCES += $(ARGON2_SRC_DIR)/ref.c
 else
@@ -36,25 +55,7 @@ endif
 
 OBJECTS = $(addsuffix .o, $(basename $(SOURCES)))
 
-KERNEL_NAME := $(shell uname -s)
-
-LIB_NAME = $(BASEDIR)/priv/argon2_nif.so
-
-ifneq ($(CROSSCOMPILE),)
-	LIB_CFLAGS := -shared -fPIC -fvisibility=hidden -DA2_VISCTL=1
-	SO_LDFLAGS := -Wl,-soname,libargon2.so.0
-else
-	ifeq ($(KERNEL_NAME), Linux)
-		LIB_CFLAGS := -shared -fPIC -fvisibility=hidden -DA2_VISCTL=1
-		SO_LDFLAGS := -Wl,-soname,libargon2.so.0
-	endif
-	ifeq ($(KERNEL_NAME), Darwin)
-		LIB_CFLAGS := -dynamiclib -undefined dynamic_lookup
-	endif
-	ifeq ($(KERNEL_NAME), $(filter $(KERNEL_NAME),OpenBSD FreeBSD NetBSD))
-		LIB_CFLAGS := -shared -fPIC
-	endif
-endif
+CFLAGS += -std=c89 -pthread -O3 -Wall -g -I$(ARGON2_INC_DIR) -I$(ARGON2_SRC_DIR) -I. -I$(ERTS_INCLUDE_DIR)
 
 LDLIBS += -L $(ERL_INTERFACE_LIB_DIR) -lerl_interface -lei
 LDFLAGS += -shared
