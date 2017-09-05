@@ -7,31 +7,54 @@ ERTS_INCLUDE_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s/erts
 ERL_INTERFACE_INCLUDE_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s\", [code:lib_dir(erl_interface, include)]).")
 ERL_INTERFACE_LIB_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s\", [code:lib_dir(erl_interface, lib)]).")
 
-ARGON2_SRC_DIR = ../vendor/argon2/src
-ARGON2_INC_DIR = ../vendor/argon2/include
-C_SRC_DIR = $(CURDIR)
-C_SRC_OUTPUT ?= $(CURDIR)/../priv/argon2_nif.so
+ARGON2_SRC_DIR = $(BASEDIR)/vendor/argon2/src
+ARGON2_INC_DIR = $(BASEDIR)/vendor/argon2/include
 
 # System type and C compiler/flags.
 
 UNAME_SYS := $(shell uname -s)
-ifeq ($(UNAME_SYS), Darwin)
-	CC ?= cc
-	CFLAGS ?= -O3 -pthread -std=c89 -arch x86_64 -finline-functions -Wall -Wmissing-prototypes
-	CXXFLAGS ?= -O3 -pthread -arch x86_64 -finline-functions -Wall
-	LDFLAGS ?= -arch x86_64 -flat_namespace -undefined suppress
-else ifeq ($(UNAME_SYS), FreeBSD)
-	CC ?= cc
-	CFLAGS ?= -O3 -std=c89 -finline-functions -Wall -Wmissing-prototypes
-	CXXFLAGS ?= -O3 -finline-functions -Wall
-else ifeq ($(UNAME_SYS), Linux)
-	CC ?= gcc
-	CFLAGS ?= -O3 -std=c89 -finline-functions -Wall -Wmissing-prototypes
-	CXXFLAGS ?= -O3 -finline-functions -Wall
+CFLAGS += -std=c89 -pthread -O3 -Wall -g -I$(ARGON2_INC_DIR) -I$(ARGON2_SRC_DIR) -I. -I$(ERTS_INCLUDE_DIR)
+
+OPTTARGET ?= native
+OPTTEST := $(shell $(CC) -I$(ARGON2_INC_DIR) -I$(ARGON2_SRC_DIR) -march=$(OPTTARGET) $(SRC_DIR)/opt.c -c\
+	-o /dev/null 2>/dev/null; echo $$?)
+
+SOURCES := \
+	$(ARGON2_SRC_DIR)/argon2.c \
+	$(ARGON2_SRC_DIR)/core.c \
+	$(ARGON2_SRC_DIR)/blake2/blake2b.c \
+	$(ARGON2_SRC_DIR)/thread.c \
+	$(ARGON2_SRC_DIR)/encoding.c \
+	$(CURDIR)/argon2_nif.c
+
+ifneq ($(OPTTEST), 0)
+	SOURCES += $(ARGON2_SRC_DIR)/ref.c
+else
+	CFLAGS += -march=$(OPTTARGET)
+	SOURCES += $(ARGON2_SRC_DIR)/opt.c
 endif
 
-CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(ARGON2_INC_DIR) -I $(ARGON2_SRC_DIR)
-CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(ARGON2_INC_DIR) -I $(ARGON2_SRC_DIR)
+OBJECTS = $(addsuffix .o, $(basename $(SOURCES)))
+
+KERNEL_NAME := $(shell uname -s)
+
+LIB_NAME = $(BASEDIR)/priv/argon2_nif.so
+
+ifneq ($(CROSSCOMPILE),)
+	LIB_CFLAGS := -shared -fPIC -fvisibility=hidden -DA2_VISCTL=1
+	SO_LDFLAGS := -Wl,-soname,libargon2.so.0
+else
+	ifeq ($(KERNEL_NAME), Linux)
+		LIB_CFLAGS := -shared -fPIC -fvisibility=hidden -DA2_VISCTL=1
+		SO_LDFLAGS := -Wl,-soname,libargon2.so.0
+	endif
+	ifeq ($(KERNEL_NAME), Darwin)
+		LIB_CFLAGS := -dynamiclib -undefined dynamic_lookup
+	endif
+	ifeq ($(KERNEL_NAME), $(filter $(KERNEL_NAME),OpenBSD FreeBSD NetBSD))
+		LIB_CFLAGS := -shared -fPIC
+	endif
+endif
 
 LDLIBS += -L $(ERL_INTERFACE_LIB_DIR) -lerl_interface -lei
 LDFLAGS += -shared
@@ -41,39 +64,17 @@ LDFLAGS += -shared
 c_verbose_0 = @echo " C     " $(?F);
 c_verbose = $(c_verbose_$(V))
 
-cpp_verbose_0 = @echo " CPP   " $(?F);
-cpp_verbose = $(cpp_verbose_$(V))
-
 link_verbose_0 = @echo " LD    " $(@F);
 link_verbose = $(link_verbose_$(V))
 
-SOURCES := \
-	$(ARGON2_SRC_DIR)/argon2.c \
-	$(ARGON2_SRC_DIR)/core.c \
-	$(ARGON2_SRC_DIR)/blake2/blake2b.c \
-	$(ARGON2_SRC_DIR)/thread.c \
-	$(ARGON2_SRC_DIR)/encoding.c \
-	$(C_SRC_DIR)/argon2_nif.c
-OBJECTS = $(addsuffix .o, $(basename $(SOURCES)))
-
 COMPILE_C = $(c_verbose) $(CC) $(CFLAGS) $(CPPFLAGS) -c
-COMPILE_CPP = $(cpp_verbose) $(CXX) $(CXXFLAGS) $(CPPFLAGS) -c
 
-$(C_SRC_OUTPUT): $(OBJECTS)
+$(LIB_NAME): $(OBJECTS)
 	@mkdir -p $(BASEDIR)/priv/
-	$(link_verbose) $(CC) $(OBJECTS) $(LDFLAGS) $(LDLIBS) -o $(C_SRC_OUTPUT)
+	$(link_verbose) $(CC) $(OBJECTS) $(LDFLAGS) $(LDLIBS) -o $(LIB_NAME)
 
 %.o: %.c
 	$(COMPILE_C) $(OUTPUT_OPTION) $<
 
-%.o: %.cc
-	$(COMPILE_CPP) $(OUTPUT_OPTION) $<
-
-%.o: %.C
-	$(COMPILE_CPP) $(OUTPUT_OPTION) $<
-
-%.o: %.cpp
-	$(COMPILE_CPP) $(OUTPUT_OPTION) $<
-
 clean:
-	@rm -f $(C_SRC_OUTPUT) $(OBJECTS)
+	@rm -f $(LIB_NAME) $(OBJECTS)
